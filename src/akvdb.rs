@@ -1,7 +1,10 @@
 extern crate bincode;
 extern crate libactionkv;
 
-//use std::io::prelude::*;
+use aes_gcm::{
+    aead::{KeyInit, OsRng},
+    Aes256Gcm,
+};
 use libactionkv::{ActionKV, ByteString};
 use std::collections::HashMap;
 
@@ -12,6 +15,7 @@ Usage:
     akv_mem.exe FILE delete KEY
     akv_mem.exe FILE insert KEY VALUE
     akv_mem.exe FILE update KEY VALUE
+    akv_mem.exe FILE key anything
 ";
 
 #[cfg(not(target_os = "windows"))]
@@ -21,6 +25,7 @@ Usage:
     akv_mem FILE delete KEY
     akv_mem FILE insert KEY VALUE
     akv_mem FILE update KEY VALUE
+    akv_mem FILE key anything
 ";
 
 fn store_index_on_disk(a: &mut ActionKV, index_key: &[u8]) {
@@ -59,7 +64,12 @@ fn main() {
                 None => eprintln!("{:?} not found", key),
                 Some(&i) => {
                     let kv = akv.get_at(i).unwrap();
-                    println!("{:?}", kv.value)
+                    let key = String::from_utf8(kv.key).expect("Failed to parse key as UTF8");
+                    if let Ok(value) = String::from_utf8(kv.value.clone()) {
+                        println!("{} = {:?}", key, value)
+                    } else {
+                        println!("{} = {:?}", key, kv.value)
+                    }
                 }
             }
         }
@@ -82,6 +92,11 @@ fn main() {
             let value = maybe_value.expect(&USAGE).as_ref();
             akv.update(key, value).unwrap();
             store_index_on_disk(&mut akv, INDEX_KEY);
+        }
+        "key" => {
+            let key = Aes256Gcm::generate_key(&mut OsRng);
+            let encoded_key = base_62::encode(key.as_slice());
+            println!("{}", encoded_key);
         }
         _ => eprintln!("{}", &USAGE),
     }

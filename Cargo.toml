@@ -5,9 +5,13 @@ edition = "2021"
 authors = ["Tim McNamara <author@rustinaction.com>", "Olle Wreede <olle@wreede.se>"]
 
 [dependencies]
+aes-gcm = "0.10.1"
+base-62 = "0.1.1"
 bincode = "1.3.3"
 blake3 = "1.3.1"
 byteorder = "1.2"
+generic-array = "0.14.6"
+rand = "0.8.5"
 serde = "1.0.145"
 serde_derive = "1.0.145"
 

@@ -1,15 +1,24 @@
 #[macro_use]
 extern crate serde_derive;
-
 extern crate byteorder;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io;
-use std::io::prelude::*;
-use std::io::{BufReader, BufWriter, SeekFrom};
-use std::path::Path;
+use {
+    aes_gcm::{
+        aead::{Aead, KeyInit},
+        Aes256Gcm, Nonce,
+    },
+    byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
+    generic_array::GenericArray,
+    rand::prelude::*,
+};
+
+use std::{
+    collections::HashMap,
+    env,
+    fs::{File, OpenOptions},
+    io::{self, prelude::*, BufReader, BufWriter, SeekFrom},
+    path::Path,
+};
 
 pub type ByteString = Vec<u8>;
 pub type ByteStr = [u8];
@@ -45,6 +54,8 @@ impl ActionKV {
     fn process_record<R: Read>(f: &mut R) -> io::Result<KeyValuePair> {
         let mut saved_checksum = [0; 32];
         f.read_exact(&mut saved_checksum)?;
+        let mut saved_nonce = [0; 12];
+        f.read_exact(&mut saved_nonce)?;
         let key_len = f.read_u32::<LittleEndian>()?;
         let val_len = f.read_u32::<LittleEndian>()?;
         let data_len = key_len + val_len;
@@ -69,14 +80,15 @@ impl ActionKV {
         let val = data.split_off(key_len as usize);
         let key = data;
 
+        let decrypted_data = Self::decrypt_data(&val, &saved_nonce)?;
+
         Ok(KeyValuePair {
             key: key,
-            value: val,
+            value: decrypted_data,
         })
     }
 
     pub fn seek_to_end(&mut self) -> io::Result<u64> {
-        //let mut f = BufReader::new(&mut self.f);
         self.f.seek(SeekFrom::End(0))
     }
 
@@ -170,16 +182,18 @@ impl ActionKV {
     pub fn insert_but_ignore_index(&mut self, key: &ByteStr, value: &ByteStr) -> io::Result<u64> {
         let mut f = BufWriter::new(&mut self.f);
 
+        let (encrypted_data, nonce) = Self::encrypt_data(value)?;
+
         let key_len = key.len();
-        let val_len = value.len();
+        let val_len = encrypted_data.len();
         let mut tmp = ByteString::with_capacity(key_len + val_len);
 
         for byte in key {
             tmp.push(*byte);
         }
 
-        for byte in value {
-            tmp.push(*byte);
+        for byte in encrypted_data {
+            tmp.push(byte);
         }
 
         let checksum = blake3::hash(&tmp);
@@ -188,6 +202,7 @@ impl ActionKV {
         let current_position = f.seek(SeekFrom::Current(0))?;
         f.seek(next_byte)?;
         f.write(checksum.as_bytes())?;
+        f.write(&nonce)?;
         f.write_u32::<LittleEndian>(key_len as u32)?;
         f.write_u32::<LittleEndian>(val_len as u32)?;
         f.write_all(&mut tmp)?;
@@ -203,5 +218,35 @@ impl ActionKV {
     #[inline]
     pub fn delete(&mut self, key: &ByteStr) -> io::Result<()> {
         self.insert(key, b"")
+    }
+
+    fn encrypt_data(data: &ByteStr) -> io::Result<(ByteString, ByteString)> {
+        let random_nonce = rand::thread_rng().gen::<[u8; 12]>();
+        let nonce = Nonce::from_slice(&random_nonce); // 96-bits; unique per message
+        let encrypted_data = Self::cipher()?
+            .encrypt(nonce, data)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to encrypt data"))?;
+        Ok((encrypted_data, nonce.to_vec()))
+    }
+
+    fn decrypt_data(data: &ByteStr, nonce: &ByteStr) -> io::Result<ByteString> {
+        let decrypted_data = Self::cipher()?
+            .decrypt(Nonce::from_slice(nonce), data)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to decrypt data"))?;
+        Ok(decrypted_data)
+    }
+
+    fn cipher() -> io::Result<Aes256Gcm> {
+        let encryption_key = Self::encryption_key()?;
+        let cipher = Aes256Gcm::new(GenericArray::from_slice(&encryption_key));
+        Ok(cipher)
+    }
+
+    fn encryption_key() -> io::Result<Vec<u8>> {
+        let encoded_key = env::var("AKVDB_KEY")
+            .expect("Expected an encryption key in AKVDB_KEY environment variable");
+        let encryption_key = base_62::decode(&encoded_key)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Couldn't decode encryption key"))?;
+        Ok(encryption_key)
     }
 }
