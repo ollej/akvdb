@@ -2,10 +2,8 @@
 extern crate serde_derive;
 
 extern crate byteorder;
-extern crate crc;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use crc::crc32;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -45,7 +43,8 @@ impl ActionKV {
 
     /// Assumes that f is already at the right place in the file
     fn process_record<R: Read>(f: &mut R) -> io::Result<KeyValuePair> {
-        let saved_checksum = f.read_u32::<LittleEndian>()?;
+        let mut saved_checksum = [0; 32];
+        f.read_exact(&mut saved_checksum)?;
         let key_len = f.read_u32::<LittleEndian>()?;
         let val_len = f.read_u32::<LittleEndian>()?;
         let data_len = key_len + val_len;
@@ -59,10 +58,10 @@ impl ActionKV {
         }
         debug_assert_eq!(data.len(), data_len as usize);
 
-        let checksum = crc32::checksum_ieee(&data);
+        let checksum: [u8; 32] = blake3::hash(&data).as_bytes().clone();
         if checksum != saved_checksum {
             panic!(
-                "data corruption encountered ({:08x} != {:08x})",
+                "data corruption encountered ({:08x?} != {:08x?})",
                 checksum, saved_checksum
             );
         }
@@ -183,12 +182,12 @@ impl ActionKV {
             tmp.push(*byte);
         }
 
-        let checksum = crc32::checksum_ieee(&tmp);
+        let checksum = blake3::hash(&tmp);
 
         let next_byte = SeekFrom::End(0);
         let current_position = f.seek(SeekFrom::Current(0))?;
         f.seek(next_byte)?;
-        f.write_u32::<LittleEndian>(checksum)?;
+        f.write(checksum.as_bytes())?;
         f.write_u32::<LittleEndian>(key_len as u32)?;
         f.write_u32::<LittleEndian>(val_len as u32)?;
         f.write_all(&mut tmp)?;
