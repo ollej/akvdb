@@ -23,13 +23,13 @@ use std::{
 pub type ByteString = Vec<u8>;
 pub type ByteStr = [u8];
 
-#[derive(Debug, Serialize, Deserialize)] // #[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct KeyValuePair {
     pub key: ByteString,
     pub value: ByteString,
 }
 
-#[derive(Debug)] // #[derive(Debug)]
+#[derive(Debug)]
 pub struct ActionKV {
     f: File,
     pub index: HashMap<ByteString, u64>,
@@ -37,15 +37,15 @@ pub struct ActionKV {
 
 impl ActionKV {
     pub fn open(path: &Path) -> io::Result<Self> {
-        let f = OpenOptions::new() // An example of the "Builder" pattern. Each method returns a new instance of the OpenOptions struct with the
+        let f = OpenOptions::new()
             // relevant option set.
-            .read(true) // Enable reading
-            .write(true) // Enable writing (not strictly necessary, as it's implied by append)
-            .create(true) // Create a file at `path` if ir doesn't already exist
-            .append(true) // Don't delete any content that's already been written to disk.
+            .read(true)
+            .write(true)
+            .create(true)
+            .append(true)
             .open(path)?;
         Ok(ActionKV {
-            f: f,
+            f,
             index: HashMap::new(),
         })
     }
@@ -83,7 +83,7 @@ impl ActionKV {
         let decrypted_data = Self::decrypt_data(&val, &saved_nonce)?;
 
         Ok(KeyValuePair {
-            key: key,
+            key,
             value: decrypted_data,
         })
     }
