@@ -5,22 +5,27 @@ use {
         Aes256Gcm, Nonce,
     },
     generic_array::GenericArray,
+    lazy_static::lazy_static,
     rand::prelude::*,
 };
 
 use crate::{ByteStr, ByteString};
 
+lazy_static! {
+    static ref CIPHER: Aes256Gcm = cipher().unwrap();
+}
+
 pub fn encrypt_data(data: &ByteStr) -> io::Result<(ByteString, ByteString)> {
     let random_nonce = rand::thread_rng().gen::<[u8; 12]>();
     let nonce = Nonce::from_slice(&random_nonce); // 96-bits; unique per message
-    let encrypted_data = cipher()?
+    let encrypted_data = CIPHER
         .encrypt(nonce, data)
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to encrypt data"))?;
     Ok((encrypted_data, nonce.to_vec()))
 }
 
 pub fn decrypt_data(data: &ByteStr, nonce: &ByteStr) -> io::Result<ByteString> {
-    cipher()?
+    CIPHER
         .decrypt(Nonce::from_slice(nonce), data)
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to decrypt data"))
 }
