@@ -2,19 +2,11 @@
 extern crate serde_derive;
 extern crate byteorder;
 
-use {
-    aes_gcm::{
-        aead::{Aead, KeyInit},
-        Aes256Gcm, Nonce,
-    },
-    byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
-    generic_array::GenericArray,
-    rand::prelude::*,
-};
+mod encrypter;
 
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::{
     collections::HashMap,
-    env,
     fs::{File, OpenOptions},
     io::{self, prelude::*, BufReader, BufWriter, SeekFrom},
     path::Path,
@@ -80,7 +72,7 @@ impl ActionKV {
         let val = data.split_off(key_len as usize);
         let key = data;
 
-        let decrypted_data = Self::decrypt_data(&val, &saved_nonce)?;
+        let decrypted_data = encrypter::decrypt_data(&val, &saved_nonce)?;
 
         Ok(KeyValuePair {
             key,
@@ -182,7 +174,7 @@ impl ActionKV {
     pub fn insert_but_ignore_index(&mut self, key: &ByteStr, value: &ByteStr) -> io::Result<u64> {
         let mut f = BufWriter::new(&mut self.f);
 
-        let (encrypted_data, nonce) = Self::encrypt_data(value)?;
+        let (encrypted_data, nonce) = encrypter::encrypt_data(value)?;
 
         let key_len = key.len();
         let val_len = encrypted_data.len();
@@ -218,32 +210,5 @@ impl ActionKV {
     #[inline]
     pub fn delete(&mut self, key: &ByteStr) -> io::Result<()> {
         self.insert(key, b"")
-    }
-
-    fn encrypt_data(data: &ByteStr) -> io::Result<(ByteString, ByteString)> {
-        let random_nonce = rand::thread_rng().gen::<[u8; 12]>();
-        let nonce = Nonce::from_slice(&random_nonce); // 96-bits; unique per message
-        let encrypted_data = Self::cipher()?
-            .encrypt(nonce, data)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to encrypt data"))?;
-        Ok((encrypted_data, nonce.to_vec()))
-    }
-
-    fn decrypt_data(data: &ByteStr, nonce: &ByteStr) -> io::Result<ByteString> {
-        Self::cipher()?
-            .decrypt(Nonce::from_slice(nonce), data)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to decrypt data"))
-    }
-
-    fn cipher() -> io::Result<Aes256Gcm> {
-        let encryption_key = Self::encryption_key()?;
-        Ok(Aes256Gcm::new(GenericArray::from_slice(&encryption_key)))
-    }
-
-    fn encryption_key() -> io::Result<Vec<u8>> {
-        let encoded_key = env::var("AKVDB_KEY")
-            .expect("Expected an encryption key in AKVDB_KEY environment variable");
-        base_62::decode(&encoded_key)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Couldn't decode encryption key"))
     }
 }
