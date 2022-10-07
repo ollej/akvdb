@@ -131,8 +131,8 @@ impl ActionKV {
         Ok(kv)
     }
 
-    pub fn find(&mut self, target: &ByteStr) -> io::Result<Option<(u64, ByteString)>> {
-        let mut f = BufReader::new(&mut self.f);
+    pub fn find(&self, target: &ByteStr) -> io::Result<Option<(u64, ByteString)>> {
+        let mut f = BufReader::new(&self.f);
 
         let mut found: Option<(u64, ByteString)> = None;
 

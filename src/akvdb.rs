@@ -1,32 +1,70 @@
 extern crate bincode;
-extern crate libactionkv;
+extern crate libakvdb;
 
-use aes_gcm::{
-    aead::{KeyInit, OsRng},
-    Aes256Gcm,
+use libakvdb::{ActionKV, ByteString};
+use std::{collections::HashMap, path::PathBuf};
+use {
+    aes_gcm::{
+        aead::{KeyInit, OsRng},
+        Aes256Gcm,
+    },
+    clap::Parser,
 };
-use libactionkv::{ActionKV, ByteString};
-use std::collections::HashMap;
 
-#[cfg(target_os = "windows")]
-const USAGE: &'static str = "
-Usage:
-    akv_mem.exe FILE get KEY
-    akv_mem.exe FILE delete KEY
-    akv_mem.exe FILE insert KEY VALUE
-    akv_mem.exe FILE update KEY VALUE
-    akv_mem.exe FILE key anything
-";
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to database file
+    #[arg(short, long)]
+    database: Option<PathBuf>,
 
-#[cfg(not(target_os = "windows"))]
-const USAGE: &'static str = "
-Usage:
-    akv_mem FILE get KEY
-    akv_mem FILE delete KEY
-    akv_mem FILE insert KEY VALUE
-    akv_mem FILE update KEY VALUE
-    akv_mem FILE key anything
-";
+    /// Action to perform on database
+    #[command(subcommand)]
+    action: Action,
+}
+
+#[derive(clap::Subcommand, Clone, Debug)]
+enum Action {
+    /// <KEY> - Get an entry from the database
+    Get {
+        /// Key name to operate on
+        key: String,
+    },
+    /// <KEY> - Delete an entry from the database
+    Delete {
+        /// Key name to operate on
+        key: String,
+    },
+    /// <KEY> <VALUE> - Insert an entry into the database
+    Insert {
+        /// Key name to operate on
+        key: String,
+
+        /// Value to insert
+        value: String,
+    },
+    /// <KEY> <VALUE> - Update an entry in the database
+    Update {
+        /// Key name to operate on
+        key: String,
+
+        /// Value to update
+        value: String,
+    },
+    /// Print a randomized key to use for encryption
+    Key,
+}
+
+fn open_database(path: Option<PathBuf>) -> ActionKV {
+    let path = path.expect("Path to database required for action.");
+    ActionKV::open(&path).expect("Unable to open database file.")
+}
+
+fn load_database(path: Option<PathBuf>) -> ActionKV {
+    let mut akv = open_database(path);
+    akv.load().expect("unable to load data");
+    akv
+}
 
 fn store_index_on_disk(a: &mut ActionKV, index_key: &[u8]) {
     a.index.remove(index_key);
@@ -38,17 +76,11 @@ fn store_index_on_disk(a: &mut ActionKV, index_key: &[u8]) {
 fn main() {
     const INDEX_KEY: &[u8] = b"+index";
 
-    let args: Vec<String> = std::env::args().collect();
-    let fname = args.get(1).expect(&USAGE);
-    let action = args.get(2).expect(&USAGE).as_ref();
-    let key = args.get(3).expect(&USAGE).as_ref();
-    let maybe_value = args.get(4);
+    let args = Args::parse();
 
-    let path = std::path::Path::new(&fname);
-    let mut akv = ActionKV::open(path).expect("unable to open file");
-
-    match action {
-        "get" => {
+    match args.action {
+        Action::Get { key } => {
+            let mut akv = open_database(args.database);
             let index: HashMap<ByteString, u64> = match akv.find(INDEX_KEY) {
                 Ok(Some((_position, index_as_bytes))) => {
                     bincode::deserialize(&index_as_bytes).unwrap()
@@ -60,11 +92,10 @@ fn main() {
                 Err(_) => panic!("unable to open file"),
             };
 
-            match index.get(key) {
+            match index.get(key.as_bytes()) {
                 None => eprintln!("{:?} not found", key),
                 Some(&i) => {
                     let kv = akv.get_at(i).unwrap();
-                    let key = String::from_utf8(kv.key).expect("Failed to parse key as UTF8");
                     if let Ok(value) = String::from_utf8(kv.value.clone()) {
                         println!("{} = {:?}", key, value)
                     } else {
@@ -75,29 +106,25 @@ fn main() {
         }
         // Other actions can actually remain as-is. In a long-standing application, it would be
         // necessary to clean up the index. As this utility is one-shot, it isn't essential here.
-        "delete" => {
-            akv.load().expect("unable to load data");
-            akv.delete(key).unwrap();
+        Action::Delete { key } => {
+            let mut akv = load_database(args.database);
+            akv.delete(key.as_ref()).unwrap();
             store_index_on_disk(&mut akv, INDEX_KEY);
         }
-
-        "insert" => {
-            akv.load().expect("unable to load data");
-            let value = maybe_value.expect(&USAGE).as_ref();
-            akv.insert(key, value).unwrap();
+        Action::Insert { key, value } => {
+            let mut akv = load_database(args.database);
+            akv.insert(key.as_ref(), value.as_ref()).unwrap();
             store_index_on_disk(&mut akv, INDEX_KEY);
         }
-        "update" => {
-            akv.load().expect("unable to load data");
-            let value = maybe_value.expect(&USAGE).as_ref();
-            akv.update(key, value).unwrap();
+        Action::Update { key, value } => {
+            let mut akv = load_database(args.database);
+            akv.update(key.as_ref(), value.as_ref()).unwrap();
             store_index_on_disk(&mut akv, INDEX_KEY);
         }
-        "key" => {
+        Action::Key => {
             let key = Aes256Gcm::generate_key(&mut OsRng);
             let encoded_key = base_62::encode(key.as_slice());
             println!("{}", encoded_key);
         }
-        _ => eprintln!("{}", &USAGE),
     }
 }
