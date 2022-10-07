@@ -4,13 +4,21 @@ extern crate byteorder;
 
 mod encrypter;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use encrypter::Encrypter;
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::{self, prelude::*, BufReader, BufWriter, SeekFrom},
     path::Path,
 };
+use {
+    byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt},
+    lazy_static::lazy_static,
+};
+
+lazy_static! {
+    static ref ENCRYPTER: Encrypter = Encrypter::from_env();
+}
 
 pub type ByteString = Vec<u8>;
 pub type ByteStr = [u8];
@@ -72,7 +80,7 @@ impl ActionKV {
         let val = data.split_off(key_len as usize);
         let key = data;
 
-        let decrypted_data = encrypter::decrypt_data(&val, &saved_nonce)?;
+        let decrypted_data = ENCRYPTER.decrypt(&val, &saved_nonce)?;
 
         Ok(KeyValuePair {
             key,
@@ -174,7 +182,7 @@ impl ActionKV {
     pub fn insert_but_ignore_index(&mut self, key: &ByteStr, value: &ByteStr) -> io::Result<u64> {
         let mut f = BufWriter::new(&mut self.f);
 
-        let (encrypted_data, nonce) = encrypter::encrypt_data(value)?;
+        let (encrypted_data, nonce) = ENCRYPTER.encrypt(value)?;
 
         let key_len = key.len();
         let val_len = encrypted_data.len();
