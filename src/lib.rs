@@ -230,23 +230,20 @@ impl ActionKV {
     }
 
     fn decrypt_data(data: &ByteStr, nonce: &ByteStr) -> io::Result<ByteString> {
-        let decrypted_data = Self::cipher()?
+        Self::cipher()?
             .decrypt(Nonce::from_slice(nonce), data)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to decrypt data"))?;
-        Ok(decrypted_data)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to decrypt data"))
     }
 
     fn cipher() -> io::Result<Aes256Gcm> {
         let encryption_key = Self::encryption_key()?;
-        let cipher = Aes256Gcm::new(GenericArray::from_slice(&encryption_key));
-        Ok(cipher)
+        Ok(Aes256Gcm::new(GenericArray::from_slice(&encryption_key)))
     }
 
     fn encryption_key() -> io::Result<Vec<u8>> {
         let encoded_key = env::var("AKVDB_KEY")
             .expect("Expected an encryption key in AKVDB_KEY environment variable");
-        let encryption_key = base_62::decode(&encoded_key)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Couldn't decode encryption key"))?;
-        Ok(encryption_key)
+        base_62::decode(&encoded_key)
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Couldn't decode encryption key"))
     }
 }
