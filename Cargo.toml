@@ -17,6 +17,13 @@ rand = "0.8.5"
 serde = "1.0.145"
 serde_derive = "1.0.145"
 
+[profile.release]
+opt-level = 'z'
+lto = true
+panic = 'abort'
+codegen-units = 1
+strip = true
+
 [lib]
 name = "libakvdb"
 path = "src/lib.rs"
