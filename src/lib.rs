@@ -69,7 +69,7 @@ impl ActionKV {
         }
         debug_assert_eq!(data.len(), data_len as usize);
 
-        let checksum: [u8; 32] = blake3::hash(&data).as_bytes().clone();
+        let checksum: [u8; 32] = *blake3::hash(&data).as_bytes();
         if checksum != saved_checksum {
             panic!(
                 "data corruption encountered ({:08x?} != {:08x?})",
@@ -128,7 +128,7 @@ impl ActionKV {
 
         let kv = self.get_at(position)?;
 
-        Ok(Some(ByteString::from(kv.value)))
+        Ok(Some(kv.value))
     }
 
     pub fn get_at(&mut self, position: u64) -> io::Result<KeyValuePair> {
@@ -201,11 +201,11 @@ impl ActionKV {
         let next_byte = SeekFrom::End(0);
         let current_position = f.seek(SeekFrom::Current(0))?;
         f.seek(next_byte)?;
-        f.write(checksum.as_bytes())?;
-        f.write(&nonce)?;
+        f.write_all(checksum.as_bytes())?;
+        f.write_all(&nonce)?;
         f.write_u32::<LittleEndian>(key_len as u32)?;
         f.write_u32::<LittleEndian>(val_len as u32)?;
-        f.write_all(&mut tmp)?;
+        f.write_all(&tmp)?;
 
         Ok(current_position)
     }
