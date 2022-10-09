@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    name: Release for ${{ matrix.config.target }} / ${{ matrix.config.os }}
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - os: ubuntu-latest
+            artifact_name: akvdb
+            zip_file: akvdb-linux.tar.gz
+            asset_name: akvdb-linux-$tag.tar.gz
+            target: 'x86_64-unknown-linux-gnu'
+          - os: windows-latest
+            artifact_name: akvdb.exe
+            zip_file: akvdb-windows.zip
+            asset_name: akvdb-windows-$tag.zip
+            target: 'x86_64-pc-windows-msvc'
+          - os: macos-latest
+            artifact_name: akvdb
+            zip_file: akvdb-macos.zip
+            asset_name: akvdb-macos-$tag.zip
+            target: 'x86_64-apple-darwin'
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.config.target }}
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --locked --all-targets --target=${{ matrix.config.target }}
+      - name: Zip release archive
+        if: matrix.config.target == 'x86_64-unknown-linux-gnu'
+        run: tar -zcf ${{ matrix.config.zip_file }} assets/ -C target/${{ matrix.config.target }}/release/ ${{ matrix.config.artifact_name }}
+      - name: Zip release archive
+        if: runner.os == 'Windows' || runner.os == 'macOS'
+        run: 7z a -tzip ${{ matrix.config.zip_file }} assets/* ./target/${{ matrix.config.target }}/release/${{ matrix.config.artifact_name }}
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ matrix.config.zip_file }}
+          asset_name: ${{ matrix.config.asset_name }}
+          tag: ${{ github.ref }}
